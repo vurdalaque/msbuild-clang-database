@@ -86,7 +86,7 @@ def cleanup(silent = False, cdatabase = False, path = '.'):
 
 class source_file:
     def __init__(self, f, d, _F, _D, _I, _isystem, finc, pch):
-        self.file = '{d}/{f}'.format(d = d, f = f)
+        self.file = os.path.abspath('{d}/{f}'.format(d = d, f = f)).replace('\\', '/')
         self.directory = d
         self.command = 'clang++ {flags} {defs} {inc} {sys} {cdev}'.format(
                 flags = ' '.join(_F),

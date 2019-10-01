@@ -1,3 +1,4 @@
+@rem script location windows/system32
 @if exist ./compile_commands.json (
 	@set NVIM_GUI="running"
 	@start nvim-qt.exe ./compile_commands.json %*
