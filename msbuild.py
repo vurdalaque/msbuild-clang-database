@@ -322,7 +322,7 @@ class command_parser:
                 'definition': ['^[/-]D\s*([^ ]*)', self.definition],
                 'include_0': ['^[/-]I\s*"([^"]+)"', self.include],
                 'include_1': ['^[/-]I\s*([^ ]*)', self.include],
-                'emit_pch': ['^/Yc"([^"]+\.(h|hpp|hxx))"', self.include_file], # must be emit_pch
+                'emit_pch': ['^/Y[cu]"([^"]+\.(h|hpp|hxx))"', self.include_file],
                 '/skip_flags': ['^([/-][a-zA-Z]([^ ]*))', self.skip],
                 'source': ['^([^ $]+\.(cpp|cxx|cs|cc|c))', self.source],
                 }
