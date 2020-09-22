@@ -12,7 +12,7 @@ build_opts = []
 
 config = {
         'ignore_cc': True,
-        'ignore_bb': False,
+        'ignore_bb': True,
         'mixed_decoder': 'cp1251',
         'log' : False,
         'file_name' : 'cc.log',
@@ -55,9 +55,6 @@ def cleanup(silent = False, cdatabase = False, path = '.'):
         if msvcrt.getch() != b'y':
             return
     masks = [
-            '^Makefile$',
-            '^Makefile.Release$',
-            '^Makefile.Debug$',
             '^.*\.sln$',
             '^.*\.pdb$',
             '^cc\.log$',
@@ -68,6 +65,10 @@ def cleanup(silent = False, cdatabase = False, path = '.'):
             ]
     if cdatabase is True:
         masks.append('^compile_commands.json$')
+        masks.append('^Makefile$')
+        masks.append('^Makefile.Release$')
+        masks.append('^Makefile.Debug$')
+
     masks = [re.compile(r) for r in masks]
     for f in os.listdir('./'):
         for m in masks:
@@ -88,6 +89,12 @@ class source_file:
     def __init__(self, f, d, _F, _D, _I, _isystem, finc, pch):
         self.file = os.path.abspath('{d}/{f}'.format(d = d, f = f)).replace('\\', '/')
         self.directory = d
+        self.flags = _F
+        self.defs = _D
+        self.inc = _I
+        self.sys_inc = _isystem
+        self.finc = finc
+        self.pch = pch
         self.command = 'clang++ {flags} {defs} {inc} {sys} {cdev}'.format(
                 flags = ' '.join(_F),
                 defs = ' '.join(['-D {f}'.format(f = f) for f in _D]),
@@ -114,8 +121,16 @@ class source_file:
             command.extend(['-include', self.finc])
         return command
 
+    def optlen(self):
+        return len(self.command)
+
     def toJSON(self):
-        return json.dumps(self, default=lambda o: o.__dict__,
+        class json_src:
+            def __init__(self, source_file):
+                self.file = source_file.file
+                self.directory = source_file.directory
+                self.command = source_file.command
+        return json.dumps(json_src(self), default=lambda o: o.__dict__,
                 sort_keys=True, indent=4)
 
 class command_parser:
@@ -270,25 +285,42 @@ class command_parser:
                 if Path(self.rel_path + header).exists():
                     self.source([header], False)
 
-        lprint('create entry for: ' + self.rel_path + path)
         if not Path(self.rel_path + path).exists():
             lprint('file ' + self.rel_path + path + ' is unreachable ***WARNING***')
 
-        self.files.append(source_file(
-            self.rel_path + path,
-            self.dir,
-            self.flags,
-            self.defs,
-            self.inc,
-            self.sys_inc,
-            self.header_inc,
-            self.pch))
+        src = source_file(
+                self.rel_path + path,
+                self.dir,
+                self.flags,
+                self.defs,
+                self.inc,
+                self.sys_inc,
+                self.header_inc,
+                self.pch)
+        for source in self.files:
+            if source.file == src.file:
+                lprint(path + ' dup ***WARNING***')
+                if source.optlen() < src.optlen():
+                    source.flags = src.flags
+                    source.defs = src.defs
+                    source.inc = src.inc
+                    source.sys_inc = src.sys_inc
+                    source.finc = src.finc
+                    source.pch = src.pch
+                    source.command = src.command
+                break
+        else:
+            lprint(path)
+            self.files.append(src)
 
     def include_file(self, groups):
         log('file include: ' + groups[0] + '\n')
         inc = self.rel_path + groups[0].replace("\\", "/")
         if not Path(inc).exists():
             lprint('file ' + inc + ' is unreachable ***WARNING***')
+
+        if self.header_inc is not None and len(self.header_inc) > 0 and self.header_inc != inc:
+            lprint('global include file "' + self.header_inc + '" was overriden by "' + inc + '" ***WARNING***')
         self.header_inc = inc
 
     def emit_pch(self, groups):
@@ -324,7 +356,7 @@ class command_parser:
                 'include_1': ['^[/-]I\s*([^ ]*)', self.include],
                 'emit_pch': ['^/Y[cu]"([^"]+\.(h|hpp|hxx))"', self.include_file],
                 '/skip_flags': ['^([/-][a-zA-Z]([^ ]*))', self.skip],
-                'source': ['^([^ $]+\.(cpp|cxx|cs|cc|c))', self.source],
+                'source': ['^"?([^ $]+\.(cpp|cxx|cs|cc|c))"?', self.source],
                 }
 
     def compilation_database(self):
@@ -358,10 +390,13 @@ if __name__ == '__main__':
     p = command_parser()
 
     projects = []
-    if len(sys.argv) > 1:
-        projects.append(sys.argv[1])
+    for idx in range(1, len(sys.argv)):
+        if sys.argv[idx].startswith("/"): # exclude parameters
+            build_opts.append(sys.argv[idx])
+        else:
+            projects.append(sys.argv[idx])
 
-    if len(sys.argv) == 1 and not Path('./build.log').exists():
+    if not Path('./build.log').exists() or config['ignore_bb'] is True:
         projects = p.qmake()
         if len(projects) == 0:
             projects = [f for f in os.listdir('./') if re.match('^.*\.vcxproj$', f) is not None]
@@ -370,7 +405,7 @@ if __name__ == '__main__':
             lprint('*.vcxproj name required. Nothing to build...')
             os._exit(0)
 
-    if Path("./build.log").exists():
+    if Path("./build.log").exists() and config['ignore_bb'] is False:
         p.msbuild(None)
     else:
         for proj in projects:
