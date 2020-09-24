@@ -32,6 +32,8 @@ replaceable_path = {
         'D:/projects/extsdk/trunk/openssl/include': '',
         }
 
+ycm_extra_conf_pattern = "def Settings( **kwargs ):\n    return {'flags': [\n$FLAGS$ ],\n}"
+
 if Path('cc_args').exists():
     exec(open('./cc_args').read(), globals(), locals())
 
@@ -95,12 +97,13 @@ class source_file:
         self.sys_inc = _isystem
         self.finc = finc
         self.pch = pch
-        self.command = 'clang++ {flags} {defs} {inc} {sys} {cdev}'.format(
+        self.command = '"C:/Program Files/LLVM/bin/clang++" "{source}" {flags} {defs} {inc} {sys} {cdev}'.format(
                 flags = ' '.join(_F),
                 defs = ' '.join(['-D {f}'.format(f = f) for f in _D]),
                 inc = ' '.join(['-I "{f}"'.format(f = f) for f in _I]),
                 sys = ' '.join(['-isystem "{f}"'.format(f = f) for f in _isystem]),
-                cdev = '-include \"c:/.config/cc_dev.h\"'
+                cdev = '-include "c:/.config/cc_dev.h"',
+                source = f
                 )
 
         if finc is not None:
@@ -363,12 +366,47 @@ class command_parser:
         if len(self.files) == 0:
             lprint('no files to generate compilation_database')
             return
+        lprint('generating compile_commands.json');
         with open('compile_commands.json', 'w') as js:
             js.write('[')
             js.write(',\n'.join([f.toJSON() for f in self.files]))
             js.write(']')
 
         cleanup()
+
+    def extra_conf(self):
+        if len(self.files) == 0:
+            lprint('no files to generate compilation_database')
+            return
+        lprint('generating .ycm_extra_conf.py (warn: experimental)');
+        flags = ['-include', '"c:/.config/cc_dev.h"',]
+        flags_writeable = ''
+
+        for source in self.files:
+
+            for F in source.flags:
+                if F not in flags:
+                    flags.append(F)
+                    flags_writeable = flags_writeable + '        \'' + F + '\',\n'
+
+            for D in source.defs:
+                value = '-D {f}'.format(f = D)
+                if value not in flags:
+                    flags.append(value)
+                    flags_writeable = flags_writeable + '        \'-D\', \'' + D + '\',\n'
+            for inc in source.sys_inc:
+                value = '-isystem "{f}"'.format(f = inc)
+                if value not in flags:
+                    flags.append(value)
+                    flags_writeable = flags_writeable + '        \'-isystem\', \'' + inc + '\',\n'
+            for inc in source.inc:
+                value = '-I "{f}"'.format(f = inc)
+                if value not in flags:
+                    flags.append(value)
+                    flags_writeable = flags_writeable + '        \'-I\', \'' + inc + '\',\n'
+
+        with open('.ycm_extra_conf.py', 'w') as f:
+            f.write(ycm_extra_conf_pattern.replace('$FLAGS$', flags_writeable))
 
 if __name__ == '__main__':
     exit_reason = []
@@ -410,6 +448,7 @@ if __name__ == '__main__':
     else:
         for proj in projects:
             p.msbuild(proj)
-    p.compilation_database()
 
+    p.compilation_database()
+    p.extra_conf()
 
