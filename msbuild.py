@@ -379,10 +379,15 @@ class command_parser:
             lprint('no files to generate compilation_database')
             return
         lprint('generating .ycm_extra_conf.py (warn: experimental)');
-        flags = ['-include', '"c:/.config/cc_dev.h"',]
-        flags_writeable = ''
+        flags = []
+        flags_writeable = '        \'-include\', \'c:/.config/cc_dev.h\',\n'
 
         for source in self.files:
+            if source.finc is not None:
+                value = '-include "{f}"'.format(f = source.finc)
+                if value not in flags:
+                    flags.append(value)
+                    flags_writeable = flags_writeable + '        \'-include\', \'' + source.finc + '\',\n'
 
             for F in source.flags:
                 if F not in flags:
