@@ -12,7 +12,7 @@ build_opts = []
 
 config = {
         'ignore_cc': True,
-        'ignore_bb': True,
+        'ignore_bb': False,
         'mixed_decoder': 'cp1251',
         'log' : False,
         'file_name' : 'cc.log',
@@ -32,7 +32,25 @@ replaceable_path = {
         'D:/projects/extsdk/trunk/openssl/include': '',
         }
 
-ycm_extra_conf_pattern = "def Settings( **kwargs ):\n    return {'flags': [\n$FLAGS$ ],\n}"
+#  ycm_extra_conf_pattern = "def Settings( **kwargs ):\n    return {'flags': [\n$FLAGS$ ],\n}"
+ycm_extra_conf_pattern = '''
+def build_parameters():
+    return {'directory': '$PROJECT_DIR$', 'project': '$SOLUTION$'}
+
+def find_nearest_precompiled_header(pchNames = ['pch.h', 'stdafx.h', 'StdAfx.h']):
+    from pathlib import Path
+    for depth in range(0, 3):
+        prepath = './' + '../' * depth
+        for pch in pchNames:
+            p = Path(prepath + pch)
+            if p.exists():
+                return ['-include', str(p.resolve()).replace('\\\\', '/')]
+
+    return []
+
+def Settings( **kwargs ):
+    return {'flags': find_nearest_precompiled_header() + [\n$FLAGS$ ],\n}
+'''
 
 if Path('cc_args').exists():
     exec(open('./cc_args').read(), globals(), locals())
@@ -75,7 +93,7 @@ def cleanup(silent = False, cdatabase = False, path = '.'):
     for f in os.listdir('./'):
         for m in masks:
             if m.match(f) is not None:
-                print(str(Path(f).absolute()).replace('\\', '/') + ' deleted')
+                print(str(Path(f).resolve()).replace('\\', '/') + ' deleted')
                 if os.path.isdir(f):
                     shutil.rmtree(f, ignore_errors = True)
                 else:
@@ -89,25 +107,34 @@ def cleanup(silent = False, cdatabase = False, path = '.'):
 
 class source_file:
     def __init__(self, f, d, _F, _D, _I, _isystem, finc, pch):
-        self.file = os.path.abspath('{d}/{f}'.format(d = d, f = f)).replace('\\', '/')
-        self.directory = d
+        self.file = f if Path(f).is_absolute() else os.path.abspath('{d}/{f}'.format(d = d, f = f)).replace('\\', '/')
+        parent = str(Path(self.file).parent).replace('\\', '/')
+        while parent.endswith('src') and len(parent) > 3:
+            parent = str(Path(parent).parent).replace('\\', '/')
+        #  self.directory = d
+        self.directory = parent
         self.flags = _F
         self.defs = _D
-        self.inc = _I
-        self.sys_inc = _isystem
-        self.finc = finc
-        self.pch = pch
-        self.command = '"C:/Program Files/LLVM/bin/clang++" "{source}" {flags} {defs} {inc} {sys} {cdev}'.format(
+        self.inc = []
+        self.sys_inc = []
+        self.finc = []
+        for inc in _I:
+            self.inc.append(str(Path(inc).resolve()).replace('\\', '/'))
+        for inc in _isystem:
+            self.sys_inc.append(str(Path(inc).resolve()).replace('\\', '/'))
+        for inc in finc:
+            if Path(inc).is_relative_to(d):
+                self.finc.append(str(Path(inc).resolve()).replace('\\', '/'));
+        self.pch = pch if pch is None else str(Path(pch).resolve()).replace('\\', '/')
+        self.command = '"C:/Program Files/LLVM/bin/clang++" {flags} {defs} {inc} {sys} {cdev} {includes} "{source}"'.format(
                 flags = ' '.join(_F),
                 defs = ' '.join(['-D {f}'.format(f = f) for f in _D]),
                 inc = ' '.join(['-I "{f}"'.format(f = f) for f in _I]),
                 sys = ' '.join(['-isystem "{f}"'.format(f = f) for f in _isystem]),
                 cdev = '-include "c:/.config/cc_dev.h"',
+                includes = ' '.join(['-include "{f}"'.format(f = f) for f in self.finc]),
                 source = f
                 )
-
-        if finc is not None:
-            self.command = self.command + ' -include "{pch}"'.format(pch = finc)
 
         #  if pch is not None: # not supported :(
             #  self.command = self.command + ' -include-pch {pch}'.format(pch = pch)
@@ -120,8 +147,11 @@ class source_file:
             command.extend(['-I', '"{inc}"'.format(inc = inc) if (' ' in inc) == True else inc])
         for inc in self.sys_inc:
             command.extend(['-isystem', '"{inc}"'.format(inc = inc) if (' ' in inc) == True else inc])
-        if self.finc is not None:
-            command.extend(['-include', self.finc])
+        for inc in self.finc:
+            command.extend(['-include', '"{inc}"'.format(inc = inc) if (' ' in inc) == True else inc])
+        #  if self.finc is not None:
+            #  command.extend(['-include', self.finc])
+        print(command)
         return command
 
     def optlen(self):
@@ -140,7 +170,7 @@ class command_parser:
     def __init__(self):
         self.rel_path = ''
         self.files = []
-        self.header_inc = None
+        self.header_inc = []
         self.pch = None
         self.init_tags()
         self.sys_inc = SYSINCLUDE + [x.replace('\\', '/') for x in os.environ['INCLUDE'].split(';')]
@@ -176,8 +206,10 @@ class command_parser:
         return projects
 
     def msbuild(self, proj):
+        self.solution = proj
         output = None
         compile_command = ''
+        print(proj)
         if Path('build.log').exists() and config['ignore_bb'] is False:
             lprint('using build.log')
             #  output = open('build.log', 'rb').read()
@@ -249,7 +281,7 @@ class command_parser:
             chdir = chdir_match.match(line)
             if chdir is not None:
                 self.path = chdir.groups()[0].replace('\\', '/')
-                run_path = str(Path('.').absolute()).replace('\\', '/')
+                run_path = str(Path('.').resolve()).replace('\\', '/')
                 self.rel_path = os.path.relpath(self.path, run_path).replace('\\', '/') + '/'
                 print('chdir ' + self.rel_path)
 
@@ -302,7 +334,7 @@ class command_parser:
                 self.pch)
         for source in self.files:
             if source.file == src.file:
-                lprint(path + ' dup ***WARNING***')
+                #  lprint(path + ' dup ***WARNING***')
                 if source.optlen() < src.optlen():
                     source.flags = src.flags
                     source.defs = src.defs
@@ -313,7 +345,7 @@ class command_parser:
                     source.command = src.command
                 break
         else:
-            lprint(path)
+            #  lprint(path)
             self.files.append(src)
 
     def include_file(self, groups):
@@ -321,10 +353,10 @@ class command_parser:
         inc = self.rel_path + groups[0].replace("\\", "/")
         if not Path(inc).exists():
             lprint('file ' + inc + ' is unreachable ***WARNING***')
-
-        if self.header_inc is not None and len(self.header_inc) > 0 and self.header_inc != inc:
-            lprint('global include file "' + self.header_inc + '" was overriden by "' + inc + '" ***WARNING***')
-        self.header_inc = inc
+        else:
+            inc = str(Path(inc).resolve()).replace("\\", "/")
+            if inc not in self.header_inc:
+                self.header_inc.append(inc)
 
     def emit_pch(self, groups):
         lprint('DISABLED: emit pch: {pch}.pch'.format(pch = groups[0]))
@@ -339,7 +371,8 @@ class command_parser:
             command.extend(['-I', inc])
         for inc in self.sys_inc:
             command.extend(['-isystem', inc])
-        command.extend(['-include', self.header_inc])
+        for inc in self.header_inc:
+            command.extend(['-include', inc])
         clang = subprocess.Popen(command,
                 stdout = subprocess.PIPE,
                 stderr = subprocess.PIPE,
@@ -383,11 +416,11 @@ class command_parser:
         flags_writeable = '        \'-include\', \'c:/.config/cc_dev.h\',\n'
 
         for source in self.files:
-            if source.finc is not None:
-                value = '-include "{f}"'.format(f = source.finc)
+            for inc in source.finc:
+                value = '-include "{f}"'.format(f = inc)
                 if value not in flags:
                     flags.append(value)
-                    flags_writeable = flags_writeable + '        \'-include\', \'' + source.finc + '\',\n'
+                    flags_writeable = flags_writeable + '        \'-include\', \'' + inc + '\',\n'
 
             for F in source.flags:
                 if F not in flags:
@@ -411,7 +444,11 @@ class command_parser:
                     flags_writeable = flags_writeable + '        \'-I\', \'' + inc + '\',\n'
 
         with open('.ycm_extra_conf.py', 'w') as f:
-            f.write(ycm_extra_conf_pattern.replace('$FLAGS$', flags_writeable))
+            f.write(ycm_extra_conf_pattern
+                    .replace('$FLAGS$', flags_writeable)
+                    .replace('$PROJECT_DIR$', self.dir)
+                    .replace('$SOLUTION$', self.solution)
+                    )
 
 if __name__ == '__main__':
     exit_reason = []
@@ -439,20 +476,24 @@ if __name__ == '__main__':
         else:
             projects.append(sys.argv[idx])
 
-    if not Path('./build.log').exists() or config['ignore_bb'] is True:
+    projects = []  # p.qmake()
+    for proj_file in os.listdir('./'):
+        if re.match('^.*\.vcxproj$', proj_file) and proj_file not in ['ALL_BUILD.vcxproj', 'ZERO_CHECK.vcxproj', 'RUN_TESTS.vcxproj']:
+            projects.append(proj_file)
+
+    if len(projects) == 0:
         projects = p.qmake()
-        if len(projects) == 0:
-            projects = [f for f in os.listdir('./') if re.match('^.*\.vcxproj$', f) is not None]
 
-        if len(projects) == 0:
-            lprint('*.vcxproj name required. Nothing to build...')
-            os._exit(0)
+    if len(projects) == 0:
+        lprint('*.vcxproj name required. Nothing to build...')
+        os._exit(0)
 
-    if Path("./build.log").exists() and config['ignore_bb'] is False:
-        p.msbuild(None)
-    else:
-        for proj in projects:
-            p.msbuild(proj)
+    if len(projects) > 1:
+        lprint('too many vcxproj to generate output {lst}'.format(lst = ', '.join(projects)))
+        os._exit(0)
+
+    for proj in projects:
+        p.msbuild(proj)
 
     p.compilation_database()
     p.extra_conf()
