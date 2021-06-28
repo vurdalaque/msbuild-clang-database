@@ -215,7 +215,7 @@ class command_parser:
             #  output = open('build.log', 'rb').read()
             output = open('build.log').read().split('\n')
         else:
-            opts = ["msbuild.exe", "/t:Rebuild"]
+            opts = ["msbuild.exe", "/t:Rebuild", '/p:BuildProjectReferences=false']
             if len(build_opts) > 0:
                 opts.extend(build_opts)
             if len(proj) > 0:
